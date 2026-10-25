@@ -1,0 +1,195 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cerejinha da Maria Cecília</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #fff0f5; color: #8e2348;
+    font-family: Arial, sans-serif; text-align: center;
+  }
+  header { padding: 18px 12px 10px; }
+  h1 { font-size: 25px; margin: 0 0 6px; }
+  p { margin: 6px 0 14px; }
+  #stage {
+    position: relative; width: min(94vw, 430px);
+    margin: auto; overflow: hidden; border-radius: 22px;
+    border: 5px solid #f3a5c0; background: #f9dce8;
+  }
+  canvas { display: block; width: 100%; height: auto; }
+  .buttons { padding: 16px 10px 24px; }
+  button {
+    border: 0; border-radius: 24px; padding: 13px 20px;
+    margin: 5px; font-size: 16px; font-weight: bold;
+    background: #d52d65; color: white; cursor: pointer;
+  }
+  button:disabled { opacity: .5; }
+  #status { font-size: 14px; padding: 0 18px; }
+  video { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🍒 Cerejinha 🍒</h1>
+  <p>Um clique especial para celebrar Maria Cecília!</p>
+</header>
+
+<div id="stage">
+  <canvas id="photo" width="720" height="960"></canvas>
+</div>
+
+<div class="buttons">
+  <button id="start">Abrir minha câmera</button>
+  <button id="capture" disabled>Tirar foto 💗</button>
+  <p id="status">Toque em “Abrir minha câmera” para começar.</p>
+</div>
+
+<video id="video" autoplay playsinline muted></video>
+
+<script type="module">
+import {
+  FaceLandmarker,
+  FilesetResolver
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+const video = document.getElementById("video");
+const canvas = document.getElementById("photo");
+const ctx = canvas.getContext("2d");
+const start = document.getElementById("start");
+const capture = document.getElementById("capture");
+const status = document.getElementById("status");
+
+let camera = null;
+let tracker = null;
+let running = false;
+let lastTime = -1;
+let face = null;
+
+function draw() {
+  const w = canvas.width, h = canvas.height;
+
+  ctx.save();
+  ctx.translate(w, 0);
+  ctx.scale(-1, 1);
+  if (video.readyState >= 2) {
+    ctx.drawImage(video, 0, 0, w, h);
+  } else {
+    ctx.fillStyle = "#f9dce8";
+    ctx.fillRect(0, 0, w, h);
+  }
+  ctx.restore();
+
+  // Moldura delicada
+  ctx.strokeStyle = "#f5a0bd";
+  ctx.lineWidth = 12;
+  ctx.strokeRect(15, 15, w - 30, h - 30);
+
+  // Cerejinhas acompanhando a testa
+  if (face) {
+    const points = face;
+    const forehead = points[10];
+    const left = points[234];
+    const right = points[454];
+
+    const x = (1 - forehead.x) * w;
+    const y = forehead.y * h;
+    const faceWidth = Math.abs(right.x - left.x) * w;
+    const size = Math.max(28, Math.min(82, faceWidth * 0.22));
+
+    ctx.font = `${size}px serif`;
+    ctx.textAlign = "center";
+    ctx.fillText("🍒", x, y - size * 0.25);
+    ctx.font = `${size * 0.45}px serif`;
+    ctx.fillText("🎀", x, y - size * 0.85);
+  }
+
+  // Identidade visual na parte inferior
+  ctx.fillStyle = "rgba(255, 239, 246, 0.94)";
+  ctx.fillRect(35, h - 118, w - 70, 76);
+  ctx.strokeStyle = "#d52d65";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(35, h - 118, w - 70, 76);
+
+  ctx.fillStyle = "#a52350";
+  ctx.textAlign = "center";
+  ctx.font = "bold 36px Georgia, serif";
+  ctx.fillText("Maria Cecília", w / 2, h - 70);
+  ctx.font = "24px Arial";
+  ctx.fillText("🍒 Um dia doce 🍒", w / 2, h - 42);
+
+  if (running) requestAnimationFrame(loop);
+}
+
+function loop() {
+  if (!running) return;
+  if (tracker && video.readyState >= 2 && video.currentTime !== lastTime) {
+    lastTime = video.currentTime;
+    const result = tracker.detectForVideo(video, performance.now());
+    face = result.faceLandmarks?.[0] || null;
+  }
+  draw();
+}
+
+start.addEventListener("click", async () => {
+  start.disabled = true;
+  status.textContent = "Preparando a câmera...";
+
+  try {
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+    );
+
+    tracker = await FaceLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath:
+          "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+      },
+      runningMode: "VIDEO",
+      numFaces: 1
+    });
+
+    camera = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: "user" }
+    });
+
+    video.srcObject = camera;
+    await video.play();
+    running = true;
+    capture.disabled = false;
+    status.textContent =
+      "Câmera aberta! Posicione seu rosto e tire sua foto.";
+    loop();
+  } catch (error) {
+    start.disabled = false;
+    status.textContent =
+      "Não conseguimos abrir a câmera. Verifique a permissão, a conexão e tente novamente.";
+    console.error(error);
+  }
+});
+
+capture.addEventListener("click", () => {
+  draw();
+  canvas.toBlob(blob => {
+    if (!blob) {
+      status.textContent = "Não foi possível salvar a foto. Tente novamente.";
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "Maria-Cecilia-Cerejinha.png";
+    link.click();
+    URL.revokeObjectURL(url);
+    status.textContent =
+      "Foto preparada! Confira os downloads e compartilhe no Instagram. 💗";
+  }, "image/png");
+});
+
+draw();
+</script>
+</body>
+</html>
